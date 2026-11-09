@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>프랙탈 산 빚기</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap">
+<style>
+:root{--bg:#f3f1ec;--fg:#23303a;--card:#fff;--mut:#6b7780;--acc:#3d7a8a;--onacc:#fff;--line:#d9d6cf;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161c;--fg:#e6edf1;--card:#18212a;--mut:#93a1ac;--acc:#7fc3d3;--onacc:#0b1318;--line:#2a3640}}
+:root[data-theme="dark"]{--bg:#10161c;--fg:#e6edf1;--card:#18212a;--mut:#93a1ac;--acc:#7fc3d3;--onacc:#0b1318;--line:#2a3640}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:'Gowun Dodum',-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;line-height:1.5}
+main{max-width:980px;margin:0 auto;padding:16px 14px 28px}
+h1{font-size:24px;margin:4px 0 2px}
+.sub{margin:0 0 12px;color:var(--mut);font-size:14px}
+.stage{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#000}
+canvas{display:block;width:100%;touch-action:none;cursor:crosshair}
+#hint{position:absolute;left:12px;top:10px;color:rgba(255,255,255,.85);font-size:13px;text-shadow:0 1px 3px rgba(0,0,0,.6);pointer-events:none;transition:opacity 1s}
+#info{margin:10px 2px;font-size:14px;color:var(--mut)}
+#info b{color:var(--fg)}
+.panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 18px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+label{display:flex;flex-direction:column;gap:4px;font-size:14px}
+label b{display:flex;justify-content:space-between;font-weight:600}
+label b span{color:var(--mut);font-weight:400}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
+button{font:inherit;font-size:14px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.on{background:var(--acc);color:var(--onacc);border-color:var(--acc)}
+.note{margin:14px 2px 0;font-size:13px;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<h1>⛰️ 프랙탈 산 빚기</h1>
+<p class="sub">거칠기를 조절하며 무작위 산을 만들고, 손가락으로 직접 빚어 보세요. 승패 없이 구경하는 샌드박스입니다.</p>
+<div class="stage" id="stage"><canvas id="c"></canvas><div id="hint">산 위를 드래그해 빚어 보세요</div></div>
+<div id="info"></div>
+<section class="panel">
+<label><b>거칠기 <span id="vr"></span></b><input type="range" id="rough" min="0" max="100" value="45"></label>
+<label><b>산의 높이 <span id="vm"></span></b><input type="range" id="mult" min="60" max="130" value="100"></label>
+<label><b>재귀 단계 <span id="vd"></span></b><input type="range" id="det" min="1" max="9" value="8"></label>
+<label><b>눈 쌓인 높이 <span id="vs"></span></b><input type="range" id="snow" min="0" max="100" value="55"></label>
+<label><b>시간 <span id="vt"></span></b><input type="range" id="time" min="0" max="999" value="430"></label>
+</section>
+<div class="btns">
+<button id="bNew">🎲 새 산</button>
+<button data-mode="1" class="on">▲ 솟아오르기</button>
+<button data-mode="-1">▼ 깎아내기</button>
+<button data-mode="0">≈ 다듬기</button>
+<button id="bReset">되돌리기</button>
+<button id="bPlay">▶ 빚기 재생</button>
+<button id="bAuto" class="on">🌙 시간 흐름</button>
+</div>
+<p class="note">중점 변위법: 선분의 가운데 점을 무작위로 위아래로 옮기고, 단계마다 변위를 2<sup>−H</sup>배로 줄이며 반복합니다. H가 작을수록 거칠고, 프랙탈 차원은 D = 2 − H 입니다. 재귀 단계를 1에서 9까지 올리면 산이 태어나는 과정을 볼 수 있어요.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),ctx=cv.getContext('2d'),stage=$('stage');
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x)),sm=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)};
+const mix=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t),rgb=(c,a)=>a==null?`rgb(${c[0]|0},${c[1]|0},${c[2]|0})`:`rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const hs=(x,k)=>{const s=Math.sin(x*12.9898+k*78.233)*43758.5453;return s-Math.floor(s)};
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const SC=[.55,.62,.72,.82,1],OFF=[.2,.14,.09,.045,0],FOG=[.8,.62,.45,.25,.04];
+let W,Hh,dpr,lakeY,Hc,seed=2026,layers=[],edit=new Float32Array(513),dirty=true,det=8,T=.43,auto=true,mode=1,down=false,px=.5,playing=false,detF=1,ss=null;
+const stars=Array.from({length:130},()=>({x:Math.random(),y:Math.random()*.8,r:Math.random()*1.2+.3,p:Math.random()*6}));
+const clouds=Array.from({length:7},(_,i)=>({x:Math.random(),y:.06+Math.random()*.3,s:.6+Math.random()*1.1,v:.004+Math.random()*.006}));
+const flies=Array.from({length:28},()=>({a:Math.random(),b:Math.random()*6,c:Math.random()*6,d:Math.random()*6}));
+function build(){const r=rng(seed);layers=[];for(let k=0;k<5;k++){const g=new Float32Array(513);for(let i=0;i<513;i++)g[i]=Math.sqrt(-2*Math.log(r()+1e-9))*Math.cos(6.2832*r());
+layers.push({g,c:k==4?.38+.24*r():.1+.8*r(),w:k==4?.3:.18+.18*r(),a0:r()*.3-.1,a1:r()*.3-.1,v:null})}}
+const par=()=>{const r=+$('rough').value/100;return{H:.95-.85*r,mult:+$('mult').value/100,snowV:1-.8*(+$('snow').value)/100}};
+function gen(){const{H}=par(),s=512>>det;layers.forEach((L,k)=>{const h=new Float32Array(513);h[0]=L.a0;h[512]=L.a1;
+for(let l=1;l<=det;l++){const st=512>>l,sd=.55*Math.pow(2,-H*l);for(let i=st;i<512;i+=2*st)h[i]=(h[i-st]+h[i+st])/2+L.g[i]*sd}
+for(let i=0;i<=512;i+=s){const x=i/512,b=(k==4?.85:.5)*Math.exp(-(((x-L.c)/L.w)**2));h[i]=Math.max(0,.1+b+h[i]+(k==4?edit[i]:0))}L.v=h})}
+const sample=(L,x)=>{const s=512>>det,idx=clamp(x/W*512,0,512),i0=Math.floor(idx/s)*s,i1=Math.min(512,i0+s),f=(idx-i0)/s;return L.v[i0]*(1-f)+L.v[i1]*f};
+function size(){W=stage.clientWidth;Hh=Math.round(Math.max(260,Math.min(W*.6,innerHeight*.62)));dpr=Math.min(2,devicePixelRatio||1);cv.width=W*dpr;cv.height=Hh*dpr;cv.style.height=Hh+'px';lakeY=Hh*.76;Hc=lakeY*.62}
+function info(){const{H,mult,snowV}=par();$('vr').textContent='H = '+H.toFixed(2);$('vm').textContent=Math.round(mult*100)+'%';$('vd').textContent=det+'단계';$('vs').textContent=Math.round(snowV*2800)+'m 이상';
+const hr=Math.floor(T*24),mn=Math.floor((T*24-hr)*60);$('vt').textContent=String(hr).padStart(2,'0')+':'+String(mn).padStart(2,'0');
+$('info').innerHTML=`거칠기 지수 H = <b>${H.toFixed(2)}</b> → 프랙탈 차원 D = 2 − H ≈ <b>${(2-H).toFixed(2)}</b> · 재귀 ${det}단계 · 능선의 점 ${(1<<det)+1}개`}
+function draw(t){
+ctx.setTransform(dpr,0,0,dpr,0,0);const{mult,snowV}=par(),Y=(v,k)=>Math.max(8,lakeY-(v*SC[k]*mult+OFF[k])*Hc);
+const ang=(T-.25)*6.2832,sh=Math.sin(ang),day=sm(-.12,.3,sh),dusk=Math.pow(Math.max(0,1-Math.abs(sh)/.4),2);
+let top=mix(mix([8,12,38],[58,128,214],day),[90,70,130],dusk*.35),hor=mix(mix([30,32,74],[196,228,248],day),[255,150,95],dusk*.75);
+let g=ctx.createLinearGradient(0,0,0,lakeY);g.addColorStop(0,rgb(top));g.addColorStop(1,rgb(hor));ctx.fillStyle=g;ctx.fillRect(0,0,W,Hh);
+for(const s of stars){const a=(1-day)*(.45+.55*Math.sin(t*2+s.p));if(a>.02){ctx.fillStyle=`rgba(255,255,255,${a})`;ctx.fillRect(s.x*W,s.y*lakeY,s.r,s.r)}}
+if(day<.3&&!ss&&Math.random()<.003)ss={x:Math.random()*W*.8,y:Math.random()*lakeY*.3,l:0};
+if(ss){ss.l+=.03;const a=Math.sin(ss.l*3.14);ctx.strokeStyle=`rgba(255,255,255,${a*.8})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(ss.x+ss.l*160,ss.y+ss.l*70);ctx.lineTo(ss.x+ss.l*160-40,ss.y+ss.l*70-17);ctx.stroke();if(ss.l>1)ss=null}
+const sx=W*(.5-.45*Math.cos(ang)),sy=lakeY-sh*lakeY*.8,mx=W*(.5+.45*Math.cos(ang)),my=lakeY+sh*lakeY*.8;
+if(sh>-.25){const a=clamp(sh+.3,0,1),rg=ctx.createRadialGradient(sx,sy,0,sx,sy,W*.2);rg.addColorStop(0,`rgba(255,225,160,${.55*a})`);rg.addColorStop(1,'rgba(255,200,120,0)');ctx.fillStyle=rg;ctx.fillRect(0,0,W,Hh);ctx.fillStyle=`rgba(255,245,215,${a})`;ctx.beginPath();ctx.arc(sx,sy,18,0,7);ctx.fill()}
+if(sh<.25){const a=1-day,rg=ctx.createRadialGradient(mx,my,0,mx,my,W*.12);rg.addColorStop(0,`rgba(200,215,255,${.3*a})`);rg.addColorStop(1,'rgba(200,215,255,0)');ctx.fillStyle=rg;ctx.fillRect(0,0,W,Hh);ctx.fillStyle=`rgba(236,241,255,${a})`;ctx.beginPath();ctx.arc(mx,my,13,0,7);ctx.fill()}
+const cc=mix(mix([70,76,110],[255,255,255],day),[255,200,170],dusk*.6);
+for(const c of clouds){c.x=(c.x+c.v*.016*(auto?1:1))%1.3;const x=(c.x-.15)*W,y=c.y*lakeY,s=c.s*34;ctx.fillStyle=rgb(cc,.5);for(let j=0;j<5;j++){ctx.beginPath();ctx.ellipse(x+j*s*.55,y+Math.sin(j*2)*s*.12,s*(.7-Math.abs(j-2)*.12),s*.34,0,0,7);ctx.fill()}}
+ctx.strokeStyle=`rgba(30,40,50,${day*.6})`;ctx.lineWidth=1.3;if(day>.3)for(let i=0;i<3;i++){const x=((t*30*(1+i*.2)+i*300)%(W+80))-40,y=lakeY*(.18+.07*i)+Math.sin(t+i)*8,f=Math.sin(t*8+i)*4;ctx.beginPath();ctx.moveTo(x-7,y+f);ctx.lineTo(x,y);ctx.lineTo(x+7,y+f);ctx.stroke()}
+const nearC=mix(mix([22,30,40],[62,82,96],day),[70,52,80],dusk*.5),snC=mix(mix([120,132,172],[246,249,255],day),[255,190,170],dusk*.5),trC=mix([6,16,20],[24,58,46],day);
+let flag=null;
+for(let k=0;k<5;k++){const L=layers[k],s=512>>det,fg=FOG[k],base=mix(nearC,hor,fg);
+ctx.beginPath();ctx.moveTo(0,lakeY+3);let topY=1e9,mi=0;for(let i=0;i<=512;i+=s){const x=i/512*W,y=Y(L.v[i],k);if(y<topY){topY=y;mi=i}ctx.lineTo(x,y)}ctx.lineTo(W,lakeY+3);ctx.closePath();
+g=ctx.createLinearGradient(0,topY,0,lakeY);g.addColorStop(0,rgb(mix(base,[255,255,255],.04+dusk*.05)));g.addColorStop(1,rgb(mix(base,hor,.4)));ctx.fillStyle=g;ctx.fill();
+const sy2=Y(snowV,k);if(sy2<lakeY&&sy2>topY){ctx.save();ctx.clip();ctx.fillStyle=rgb(mix(snC,hor,fg*.55));ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(W,0);for(let x=W;x>=0;x-=7)ctx.lineTo(x,sy2+Math.sin(x*.05+k)*5+Math.sin(x*.13+k*3)*3+hs(x,k)*3);ctx.closePath();ctx.fill();ctx.restore()}
+if(k>=3){ctx.fillStyle=rgb(mix(trC,hor,fg*.6));ctx.beginPath();for(let x=3;x<W;x+=7){const h=hs(x,k);if(h<.35)continue;const xx=x+h*5,v=sample(L,xx);if(v>.12&&v<snowV*.85){const y=Y(v,k),th=(k==4?14:8)*(.6+h*.8);ctx.moveTo(xx,y-th);ctx.lineTo(xx-th*.32,y+1);ctx.lineTo(xx+th*.32,y+1)}}ctx.fill()}
+if(k==4)flag={x:mi/512*W,y:topY,v:L.v[mi]};
+if(k<4){g=ctx.createLinearGradient(0,lakeY-Hc*.55,0,lakeY);g.addColorStop(0,rgb(hor,0));g.addColorStop(1,rgb(hor,.38-k*.05));ctx.fillStyle=g;ctx.fillRect(0,lakeY-Hc*.55,W,Hc*.55)}}
+if(flag){const{x,y}=flag;ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y-20);ctx.stroke();ctx.fillStyle='#ff6b5e';ctx.beginPath();ctx.moveTo(x,y-20);ctx.lineTo(x+11,y-16);ctx.lineTo(x,y-12);ctx.fill();
+ctx.font='12px sans-serif';ctx.fillStyle='rgba(255,255,255,.92)';ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=3;const tx=clamp(x+14,4,W-70);ctx.fillText('정상 '+Math.round(flag.v*mult*2800)+'m',tx,Math.max(12,y-14));ctx.shadowBlur=0}
+const wc=mix(mix([6,14,26],[40,92,112],day),[90,60,80],dusk*.4);g=ctx.createLinearGradient(0,lakeY,0,Hh);g.addColorStop(0,rgb(mix(hor,wc,.35)));g.addColorStop(1,rgb(wc));ctx.fillStyle=g;ctx.fillRect(0,lakeY,W,Hh-lakeY);
+const ly=lakeY*dpr;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.beginPath();ctx.rect(0,ly,cv.width,cv.height-ly);ctx.clip();ctx.setTransform(1,0,0,-1,0,2*ly);ctx.globalAlpha=.5;ctx.drawImage(cv,0,0,cv.width,ly,0,0,cv.width,ly);ctx.restore();
+g=ctx.createLinearGradient(0,lakeY,0,Hh);g.addColorStop(0,rgb(wc,.1));g.addColorStop(1,rgb(wc,.6));ctx.fillStyle=g;ctx.fillRect(0,lakeY,W,Hh-lakeY);
+ctx.strokeStyle=`rgba(255,255,255,${.07+.1*day})`;ctx.lineWidth=1;for(let j=0;j<17;j++){const yy=lakeY+6+j*(Hh-lakeY-8)/17,xx=(j*97+t*(8+j%3*5))%W,l=18+j*3;ctx.beginPath();ctx.moveTo(xx,yy);ctx.lineTo(xx+l,yy);ctx.moveTo(xx-W,yy);ctx.lineTo(xx-W+l,yy);ctx.stroke()}
+const fa=1-day;if(fa>.05)for(const f of flies){const x=(f.a+Math.sin(t*.3+f.b)*.04)*W,y=lakeY*(.6+.38*(.5+.5*Math.sin(t*.4+f.c))),a=fa*(.3+.7*Math.pow(Math.sin(t*2+f.d),2));ctx.fillStyle=`rgba(255,240,150,${a*.22})`;ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fill();ctx.fillStyle=`rgba(255,248,190,${a})`;ctx.beginPath();ctx.arc(x,y,1.8,0,7);ctx.fill()}}
+function sculpt(){const c=px*512,R=24,L=layers[4];for(let i=Math.max(0,Math.floor(c-R*2.5));i<=Math.min(512,Math.ceil(c+R*2.5));i++){const w=Math.exp(-(((i-c)/R)**2));
+if(mode==0){const x=i/512*W,a=(sample(L,x-W*.016)+sample(L,x+W*.016))/2;edit[i]+=(a-sample(L,x))*w*.25}else edit[i]=clamp(edit[i]+mode*.014*w,-.9,1.3)}}
+let last=0;function frame(ts){const dt=Math.min(.05,(ts-last)/1000||0);last=ts;
+if(auto){T=(T+dt/100)%1;$('time').value=Math.floor(T*1000)%1000;info()}
+if(down){sculpt();dirty=true}
+if(playing){detF+=dt*1.25;const d=Math.min(9,Math.floor(detF));if(d!=det){det=d;$('det').value=d;dirty=true;info()}if(detF>=9.8){playing=false;$('bPlay').textContent='▶ 빚기 재생'}}
+if(dirty){gen();dirty=false}draw(ts/1000);requestAnimationFrame(frame)}
+function pt(e){const r=cv.getBoundingClientRect();px=(e.clientX-r.left)/r.width}
+cv.addEventListener('pointerdown',e=>{down=true;cv.setPointerCapture(e.pointerId);pt(e);$('hint').style.opacity=0});
+cv.addEventListener('pointermove',e=>{if(down)pt(e)});
+['pointerup','pointercancel'].forEach(n=>cv.addEventListener(n,()=>down=false));
+['rough','mult','snow'].forEach(id=>$(id).addEventListener('input',()=>{dirty=true;info()}));
+$('det').addEventListener('input',e=>{det=+e.target.value;playing=false;$('bPlay').textContent='▶ 빚기 재생';dirty=true;info()});
+$('time').addEventListener('input',e=>{T=+e.target.value/1000;auto=false;$('bAuto').classList.remove('on');info()});
+$('bNew').onclick=()=>{seed=Math.random()*1e9|0;build();edit.fill(0);dirty=true};
+$('bReset').onclick=()=>{edit.fill(0);dirty=true};
+$('bAuto').onclick=e=>{auto=!auto;e.target.classList.toggle('on',auto)};
+$('bPlay').onclick=e=>{playing=!playing;if(playing){detF=1;det=1;$('det').value=1;dirty=true}e.target.textContent=playing?'■ 멈춤':'▶ 빚기 재생'};
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=+b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('on',x===b))});
+addEventListener('resize',size);build();size();info();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
